@@ -31,6 +31,9 @@ const manSchema = mongoose.Schema(
     profilePicture: {
       type: String,
     },
+    contactNo: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

@@ -27,6 +27,13 @@ const leaveSchema = mongoose.Schema(
       type: Number,
       default: 1,
     },
+    managerID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Manager",
+    },
+    remark: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

@@ -15,6 +15,12 @@ const empSchema = mongoose.Schema(
     password: { type: String },
     contact: { type: Number },
     isVerfied: { type: Boolean, default: 0 },
+    performance: {
+      rating: Number, // 1 to 5 stars
+      feedback: String,
+      ratedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Manager" },
+      updatedAt: Date,
+    },
   },
   { timestamps: true }
 );

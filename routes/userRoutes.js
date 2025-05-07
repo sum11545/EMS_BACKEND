@@ -7,6 +7,7 @@ const leaveSchema = require("../model/leaveSchema");
 const deadlineSchema = require("../model/deadlineSchema");
 const salarySchema = require("../model/salarySchema");
 const managerSchema = require("../model/managerSchema");
+const taskSchema = require("../model/taskSchema");
 const jwt = require("jsonwebtoken");
 const attendanceSchema = require("../model/attendanceSchema");
 require("dotenv").config();
@@ -83,6 +84,11 @@ router.post("/register", async (req, res) => {
       totalsalary: 0,
       department,
       contact,
+      performance: {
+        rating: null, // 1 to 5 stars
+        feedback: null,
+        ratedBy: ID,
+      },
     });
 
     await empolyee.save();
@@ -92,6 +98,7 @@ router.post("/register", async (req, res) => {
       data: empolyee,
     });
   } catch (Err) {
+    console.log(Err);
     return res.status(500).send({
       messgae: "Internal Server Error",
     });
@@ -362,6 +369,9 @@ router.post("/applyLeave", isLogin, async (req, res) => {
     const totalDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24)) + 1;
     console.log(totalDays);
 
+    const userDep = await empSchema.findOne({ _id: user });
+    // const managerDep = await managerSchema.findOne({department:userDep.de})
+
     const leave = await new leaveSchema({
       empolyeeId: user,
       reason,
@@ -369,6 +379,8 @@ router.post("/applyLeave", isLogin, async (req, res) => {
       enddate,
       type,
       totaldays: totalDays,
+      managerID: userDep.manager_id,
+      remark: null,
     });
 
     await leave.save();
@@ -620,4 +632,48 @@ router.get("/getLeaveInfo", isLogin, async (req, res) => {
     });
   }
 });
+router.get("/assingTask", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const task = await taskSchema.find({ assignedTo: user });
+    return res.status(200).json({
+      message: "Task Details",
+      data: task,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      Error: error,
+    });
+  }
+});
+router.post("/completAssingTask", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const task = req.body.taskID;
+    console.log("Task ID:", task);
+    // const allTask = await taskSchema.find({ assignedTo: user });
+    // console.log(allTask);
+    const updateTask = await taskSchema.findByIdAndUpdate(task, {
+      $set: {
+        status: "Completed",
+      },
+      new: true,
+    });
+    console.log(updateTask);
+
+    return res.status(200).json({
+      message: "Task Completed",
+      data: task,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      Error: error,
+    });
+  }
+});
+
 module.exports = router;

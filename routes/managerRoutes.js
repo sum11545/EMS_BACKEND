@@ -2,13 +2,22 @@ const express = require("express");
 const router = express.Router();
 const mangerSchema = require("../model/managerSchema");
 const empSchema = require("../model/empSchema");
+const leaveSchema = require("../model/leaveSchema");
+const userSchema = require("../model/empSchema");
+const attendanceSchema = require("../model/attendanceSchema");
+const taskSchema = require("../model/taskSchema");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const SibApiV3Sdk = require("sib-api-v3-sdk");
+const socketio = require("socket.io");
+const http = require("http");
+const cors = require("cors");
+const managerSchema = require("../model/managerSchema");
 require("dotenv").config();
 var defaultClient = SibApiV3Sdk.ApiClient.instance;
 
 router.use(express.json());
+router.use(cors());
 var apiKey = defaultClient.authentications["api-key"];
 apiKey.apiKey = process.env.BREVO_KEY;
 const tranEmailApi = new SibApiV3Sdk.TransactionalEmailsApi();
@@ -36,14 +45,17 @@ const isLogin = async (req, res, next) => {
 router.get("/", (req, res) => {
   res.send("Hello From Manager Route");
 });
-router.post("/regsiter", async (req, res) => {
+router.post("/register", async (req, res) => {
   try {
-    const { name, department, email, password } = req.body;
+    const { name, department, email, password, contactNo, profilePicture } =
+      req.body;
     if (!name || !department || !email || !password) {
       return res.status(400).json({
         message: "All Filed Are required ",
       });
     }
+    console.log("Contact No", contactNo);
+
     const managerExist = await mangerSchema.findOne({ email });
     if (managerExist) {
       return res.json({
@@ -64,7 +76,8 @@ router.post("/regsiter", async (req, res) => {
       department,
       name,
       empId: Allemp,
-      profilePicture: "null",
+      profilePicture: profilePicture,
+      contactNo: contactNo,
     });
     await manager.save();
     return res.status(200).json({
@@ -121,9 +134,136 @@ router.post("/login", async (req, res) => {
     });
   }
 });
+router.post("/empCount", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const manager = await mangerSchema.findOne({ _id: user });
+
+    if (!manager) {
+      return res.status(404).json({ message: "Manager not found" });
+    }
+
+    const count = manager.empId.length;
+    console.log("Number of employees:", count);
+    res.status(200).json({
+      message: "Successfull Find the count ",
+      count: count,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      message: "Internal Server Error",
+      error,
+    });
+  }
+});
+router.post("/leaveCount", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const leaves = await leaveSchema.find({ managerID: user });
+    // console.log(leaves);
+
+    if (!leaves) {
+      return res.status(404).json({ message: "No leave records found" });
+    }
+
+    let count = 0;
+    leaves.forEach((val) => {
+      if (val.status === "Pending") count++;
+    });
+
+    console.log("Number of pending leaves:", count);
+
+    res.status(200).json({
+      message: "Successfull Find the count ",
+      count: count,
+      leaves: leaves,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error,
+    });
+  }
+});
+
+router.post("/approveLeave", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const { leaveId } = req.body;
+
+    const leaves = await leaveSchema.findOneAndUpdate(
+      { _id: leaveId },
+      {
+        $set: {
+          status: "Accepted",
+        },
+        new: true,
+      }
+    );
+
+    // console.log(leaves);
+    res.status(200).json({
+      message: "Leave Approved",
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error,
+    });
+  }
+});
+router.post("/rejectLeave", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const remark = req.body.remark;
+    const { leaveId } = req.body;
+    const leaves = await leaveSchema.findOneAndUpdate(
+      { _id: leaveId },
+      {
+        $set: {
+          status: "Rejected",
+          remark: remark,
+        },
+        new: true,
+      }
+    );
+    console.log(leaves);
+    res.status(200).json({
+      message: "Leave Rejected",
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Internal Server Error",
+      error,
+    });
+  }
+});
+router.post("/unverfiedUserList", isLogin, async (req, res) => {
+  try {
+    const user = req.user._id;
+    const allUser = await userSchema.find({ manager_id: user });
+    const unverifiedUsers = allUser.filter((user) => user.isVerfied === false);
+    console.log(unverifiedUsers);
+
+    res.status(200).json({ unverifiedUsers: unverifiedUsers });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      message: "Internal Server Error",
+      error,
+    });
+  }
+});
 router.post("/verfiyuser", isLogin, async (req, res) => {
   try {
-    const userId = req.body._id;
+    const userId = req.body.userID;
+    console.log(userId);
+
     const user = req.user._id;
     const manager = await mangerSchema.findOne({ _id: user });
     if (!manager) {
@@ -153,6 +293,13 @@ router.post("/verfiyuser", isLogin, async (req, res) => {
         message: "Employee not found",
       });
     }
+
+    await managerSchema.findByIdAndUpdate(
+      user,
+      { $addToSet: { empId: userId } },
+      { new: true }
+    );
+
     await tranEmailApi.sendTransacEmail({
       sender: { email: "sumitrai3252@gmail.com", name: "EMS Company" }, // Change sender email
       to: [{ email: verfiyEmplyee.email }],
@@ -178,5 +325,146 @@ router.post("/verfiyuser", isLogin, async (req, res) => {
     });
   }
 });
+router.post("/Chat", isLogin, async (req, res) => {
+  try {
+  } catch (error) {
+    console.log(error);
+  }
+});
 
+router.post("/performance", isLogin, async (req, res) => {
+  try {
+    const managerId = req.user._id;
+    const { employeeId, rating, feedback } = req.body;
+
+    const updated = await empSchema.findByIdAndUpdate(
+      employeeId,
+      {
+        performance: {
+          rating,
+          feedback,
+          updatedAt: new Date(),
+          ratedBy: managerId,
+        },
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "Employee not found" });
+    }
+    res.status(200).json({ message: "Performance updated", employee: updated });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error,
+    });
+  }
+});
+
+router.post("/allEmpName", isLogin, async (req, res) => {
+  try {
+    const managerID = req.user._id;
+    const names = await empSchema.find({ manager_id: managerID });
+
+    const onlyName = names.map((emp) => ({
+      name: emp.name,
+      _id: emp._id,
+    }));
+
+    console.log(onlyName);
+
+    return res.status(200).json({
+      message: "Successfully Find All the names",
+      onlyName: onlyName,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error,
+    });
+  }
+});
+
+router.post("/attendanceOverview", isLogin, async (req, res) => {
+  try {
+    const managerID = req.user._id;
+    const date = req.body.date || new Date().toISOString().split("T")[0]; // Default: today
+    const employees = await empSchema.find(
+      { manager_id: managerID },
+      "_id name"
+    );
+    const employeeIds = employees.map((emp) => emp._id);
+    const attendanceRecords = await attendanceSchema
+      .find({
+        employeeId: { $in: employeeIds },
+        startdate: date,
+      })
+      .populate("employeeId", "name");
+    console.log(attendanceRecords);
+
+    return res.status(200).json({
+      message: "Daily attendance fetched successfully",
+      data: attendanceRecords,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error,
+    });
+  }
+});
+
+router.post("/assingTask", isLogin, async (req, res) => {
+  try {
+    const managerID = req.user._id;
+    const { title, description, dueDate, empId } = req.body;
+    console.log("Employee ID", empId);
+
+    const managerDep = await mangerSchema.findOne({ _id: managerID });
+
+    const task = new taskSchema({
+      title: title,
+      description: description,
+      dueDate: dueDate,
+      assignedTo: empId,
+      assignedBy: managerID,
+      department: managerDep.department,
+    });
+
+    await task.save();
+    return res.status(200).json({
+      message: "Task assigned successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error,
+    });
+  }
+});
+router.get("/getTask", isLogin, async (req, res) => {
+  try {
+    const managerID = req.user._id;
+    const tasks = await taskSchema
+      .find({ assignedBy: managerID })
+      .populate("assignedTo", "name")
+      .sort({ dueDate: -1 });
+    return res.status(200).json({
+      message: "Tasks fetched successfully",
+      data: tasks,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error,
+    });
+  }
+});
 module.exports = router;
